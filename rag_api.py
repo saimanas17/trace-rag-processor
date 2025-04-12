@@ -43,7 +43,7 @@ def list_professors():
 
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT instructor_name FROM course_info")
+    cursor.execute("SELECT DISTINCT instructor_name FROM trace.course_info")
     names = [row[0] for row in cursor.fetchall() if row[0]]
     conn.close()
     return sorted(names)
