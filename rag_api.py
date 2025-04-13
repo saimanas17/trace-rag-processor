@@ -39,11 +39,17 @@ async def ask_question(req: QuestionRequest):
 @app.get("/professors")
 def list_professors():
     import psycopg2
-    from config.settings import DB_CONFIG
-
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT instructor_name FROM trace.course_info")
-    names = [row[0] for row in cursor.fetchall() if row[0]]
-    conn.close()
-    return sorted(names)
+    from config.setting import DB_CONFIG
+    
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT instructor_name FROM trace.course_info")
+        names = [row[0] for row in cursor.fetchall() if row[0]]
+        conn.close()
+        return sorted(names)
+    except Exception as e:
+        # Log the error
+        print(f"Database error: {str(e)}")
+        # Return a more helpful error
+        return {"error": str(e)}, 500
