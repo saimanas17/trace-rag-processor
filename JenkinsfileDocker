@@ -1,0 +1,94 @@
+pipeline {
+    agent any
+    triggers {
+        githubPush()
+    }
+
+    environment {
+        IMAGE_NAME = "saimanasg/trace-processor"
+        DOCKER_CREDENTIALS_ID = "CloudJenkinsDockerHubPAT"
+        TAG = "${env.VERSION}"
+        GIT_LOCAL_BRANCH = 'main'
+        GITHUB_TOKEN = credentials('github_token')  
+    }
+
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                script {
+                    cleanWs()  
+                }
+            }
+        }
+                stage('Checkout') {
+            steps {
+                script {
+                    echo "Checking out the repository..."
+                    // Checkout the code from the GitHub repository
+                    checkout scm
+                }
+            }
+        }
+        stage('Set up Buildx') {
+            steps {
+                script {
+                    sh 'docker run --rm --privileged multiarch/qemu-user-static --reset -p yes'
+                    sh 'docker buildx create --use --name multiarch_builder || true'
+                }
+            }
+        }
+
+        stage('Determine Version') {
+            steps {
+                script {
+                    echo 'Running semantic-release to determine new version...'
+                    
+                    // Run semantic-release and capture the output
+                    def srOutput = sh(script: "semantic-release --no-ci", returnStdout: true).trim()
+                    echo "Semantic-release output: ${srOutput}"
+
+                    // Extract the version from the output
+                    def version = sh(script: "echo '${srOutput}' | grep -oP 'The next release version is \\K[0-9]+\\.[0-9]+\\.[0-9]+'", returnStdout: true).trim()
+                    if (version) {
+						env.VERSION = version
+                        echo "Semantic release version: ${version}"
+                       
+                    } else {
+                        echo 'No new version detected, stopping pipeline.'
+                        error "No new version detected, stopping pipeline."
+                    }
+                }
+            }
+        }
+
+        stage('Login to Docker Hub') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: DOCKER_CREDENTIALS_ID, usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                        sh "echo '${DOCKER_PASSWORD}' | docker login -u '${DOCKER_USERNAME}' --password-stdin"
+                    }
+                }
+            }
+        }
+
+        stage('Build and Push Multi-Arch Docker Image') {
+            steps {
+                script {
+                    sh """
+                        docker buildx build --platform linux/amd64,linux/arm64 \\
+                        -t ${IMAGE_NAME}:${env.VERSION} . --push
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Docker Image pushed successfully: ${IMAGE_NAME}:${TAG}"
+        }
+        failure {
+            echo "Build failed!"
+        }
+    }
+}
