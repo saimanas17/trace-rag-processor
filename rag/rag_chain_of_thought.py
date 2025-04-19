@@ -44,17 +44,22 @@ def search_pinecone(query, professor=None, top_k=5):
 
 
 def generate_answer(question, context_chunks):
-    """Use OpenAI to generate a final answer from question + multiple context chunks"""
-    
-    # Filter and combine only valid text chunks
+    """Use OpenAI to generate a step-by-step answer using chain-of-thought reasoning."""
+
     valid_chunks = [chunk['metadata'].get('text', '') for chunk in context_chunks if 'metadata' in chunk and 'text' in chunk['metadata']]
-    context = "\n\n".join(valid_chunks)
+    context = "\n\n".join(valid_chunks[:5])  # Use top N chunks
 
     if not context.strip():
         return "I couldn't find enough relevant information to answer the question."
 
     prompt = f"""
-You are a helpful assistant. Use the context below to answer the question. If the answer is not in the context, say you don't know.
+You are a helpful assistant for students looking to understand university professor feedback and course experiences.
+
+Your task is to:
+1. Think step-by-step using the context.
+2. Reason through relevant points from student feedback.
+3. Provide a clear, honest answer.
+4. If the context doesn’t provide enough info, say you don’t know.
 
 Context:
 {context}
@@ -62,7 +67,7 @@ Context:
 Question:
 {question}
 
-Answer:
+Think step-by-step and answer:
 """
 
     response = openai.chat.completions.create(
@@ -70,6 +75,7 @@ Answer:
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content.strip()
+
 
 
 def summarize_history(chat_history):
@@ -93,6 +99,44 @@ Summary:"""
     return response.choices[0].message.content.strip()
 
 
+def rerank_chunks(question, chunks, top_n=3):
+    """
+    Use OpenAI to select the most relevant chunks from Pinecone results.
+    Returns the top_n most relevant chunks as decided by GPT.
+    """
+    context_texts = [
+        chunk['metadata'].get('text', '') for chunk in chunks if 'metadata' in chunk and 'text' in chunk['metadata']
+    ]
+
+    prompt = f"""
+Given the question: "{question}"
+
+Select the top {top_n} most relevant context chunks from the list below. 
+Only return the chunk numbers in descending order of relevance. 
+
+"""
+
+    for i, chunk_text in enumerate(context_texts):
+        prompt += f"Chunk {i+1}:\n{chunk_text}\n\n"
+
+    prompt += "Return the chunk numbers of the most relevant ones (e.g., 2, 5, 1):"
+
+    response = openai.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    selected_indices = response.choices[0].message.content.strip()
+    # Parse the result like: "2, 1, 3" => [1, 0, 2]
+    try:
+        selected_indices = [int(i.strip()) - 1 for i in selected_indices.split(",")]
+        return [chunks[i] for i in selected_indices if 0 <= i < len(chunks)]
+    except Exception as e:
+        print("❌ Failed to parse reranked output:", e)
+        return chunks[:top_n]  # fallback
+
+
+
 def rag_chatbot_pipeline(user_question, history=None, professor=None):
     memory_summary = ""
     if history and len(history) >= 3 and len(history) % 3 == 0:
@@ -100,7 +144,8 @@ def rag_chatbot_pipeline(user_question, history=None, professor=None):
         user_question = f"Context: {memory_summary}\n\nNow answer this:\n{user_question}"
 
     rephrased_question = generate_chain_of_thought(user_question)
-    chunks = search_pinecone(rephrased_question, professor=professor)
+    chunks = search_pinecone(rephrased_question, professor=professor, top_k=6)
+    chunks = rerank_chunks(rephrased_question, chunks, top_n=3)
     final_answer = generate_answer(user_question, chunks)
 
     return final_answer, memory_summary
