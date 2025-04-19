@@ -44,11 +44,17 @@ def search_pinecone(query, professor=None, top_k=5):
 
 
 def generate_answer(question, context_chunks):
-    """Use OpenAI to generate a final answer from question + context"""
-    context = "\n\n".join(chunk['metadata']['text'] for chunk in context_chunks)
+    """Use OpenAI to generate a final answer from question + multiple context chunks"""
+    
+    # Filter and combine only valid text chunks
+    valid_chunks = [chunk['metadata'].get('text', '') for chunk in context_chunks if 'metadata' in chunk and 'text' in chunk['metadata']]
+    context = "\n\n".join(valid_chunks)
+
+    if not context.strip():
+        return "I couldn't find enough relevant information to answer the question."
 
     prompt = f"""
-You are a helpful assistant. Use the context below to answer the question.
+You are a helpful assistant. Use the context below to answer the question. If the answer is not in the context, say you don't know.
 
 Context:
 {context}
@@ -56,13 +62,15 @@ Context:
 Question:
 {question}
 
-Answer:"""
+Answer:
+"""
 
     response = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content.strip()
+
 
 def summarize_history(chat_history):
     """Summarize earlier Q&A to preserve memory context."""
