@@ -44,22 +44,17 @@ def search_pinecone(query, professor=None, top_k=5):
 
 
 def generate_answer(question, context_chunks):
-    """Use OpenAI to generate a step-by-step answer using chain-of-thought reasoning."""
-
+    """Use OpenAI to generate a final answer from question + multiple context chunks"""
+    
+    # Filter and combine only valid text chunks
     valid_chunks = [chunk['metadata'].get('text', '') for chunk in context_chunks if 'metadata' in chunk and 'text' in chunk['metadata']]
-    context = "\n\n".join(valid_chunks[:5])  # Use top N chunks
+    context = "\n\n".join(valid_chunks)
 
     if not context.strip():
         return "I couldn't find enough relevant information to answer the question."
 
     prompt = f"""
-You are a helpful assistant for students looking to understand university professor feedback and course experiences.
-
-Your task is to:
-1. Think step-by-step using the context.
-2. Reason through relevant points from student feedback.
-3. Provide a clear, honest answer.
-4. If the context doesn’t provide enough info, say you don’t know.
+You are a helpful assistant. Use the context below to answer the question. If the answer is not in the context, say you don't know.
 
 Context:
 {context}
@@ -67,7 +62,7 @@ Context:
 Question:
 {question}
 
-Think step-by-step and answer:
+Answer:
 """
 
     response = openai.chat.completions.create(
@@ -75,7 +70,6 @@ Think step-by-step and answer:
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content.strip()
-
 
 
 def summarize_history(chat_history):
